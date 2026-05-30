@@ -23,10 +23,10 @@ export default function ChatBox() {
   }
 
   const placeholder = isDrawer
-    ? '出題者不能猜答案...'
+    ? 'Drawers cannot guess…'
     : hasGuessed
-    ? '已猜對！可以旁觀聊天 😄'
-    : '輸入答案或聊天...';
+    ? 'Correct! You can still chat 😄'
+    : 'Type your guess or chat…';
 
   return (
     <div style={styles.wrapper}>
@@ -67,7 +67,7 @@ export default function ChatBox() {
           disabled={isDrawer}
         />
         <button style={styles.sendBtn} onClick={handleSend} disabled={isDrawer}>
-          送出
+          Send
         </button>
       </div>
     </div>
@@ -79,10 +79,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    background: '#fff',
-    border: '1px solid #ddd',
-    borderRadius: 8,
-    overflow: 'hidden',
+    minHeight: 0,
   },
   messages: {
     flex: 1,
@@ -125,22 +122,28 @@ const styles: Record<string, React.CSSProperties> = {
     borderTop: '1px solid #ddd',
     padding: '0.4rem',
     gap: '0.4rem',
+    flexShrink: 0,
+    alignItems: 'center',
   },
   input: {
     flex: 1,
+    minWidth: 0,
     padding: '0.5rem',
     border: '1px solid #ddd',
     borderRadius: 6,
-    fontSize: '0.9rem',
+    fontSize: '0.85rem',
     outline: 'none',
   },
   sendBtn: {
-    padding: '0.5rem 0.8rem',
+    flexShrink: 0,
+    padding: '0.5rem 0.7rem',
     background: '#667eea',
     color: '#fff',
     border: 'none',
     borderRadius: 6,
     cursor: 'pointer',
-    fontSize: '0.85rem',
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
   },
 };

@@ -9,6 +9,7 @@ import {
   addPlayer,
   removePlayer,
   getPlayerRoom,
+  listRooms,
 } from './RoomManager';
 import { startGame, chooseWord, handleGuess, sanitizeRoom } from './gameHandler';
 import {
@@ -18,6 +19,14 @@ import {
   ChatPayload,
   UpdateSettingsPayload,
 } from './types';
+
+// Global online users: socketId → name
+const onlineUsers = new Map<string, string>();
+
+function broadcastOnline() {
+  const list = [...onlineUsers.entries()].map(([id, name]) => ({ id, name }));
+  io.emit('users:online', list);
+}
 
 const app = express();
 app.use(cors());
@@ -34,6 +43,23 @@ const io = new Server(httpServer, {
 
 io.on('connection', (socket) => {
   console.log(`[connect] ${socket.id}`);
+
+  // ── 登記名稱（連線後第一件事）────────────────────────────
+  socket.on('users:register', (name: string) => {
+    onlineUsers.set(socket.id, name || `Player${socket.id.slice(0, 4)}`);
+    broadcastOnline();
+  });
+
+  // ── 查詢在線列表 ──────────────────────────────────────────
+  socket.on('users:list', (cb: Function) => {
+    const list = [...onlineUsers.entries()].map(([id, name]) => ({ id, name }));
+    cb(list);
+  });
+
+  // ── 查詢房間列表 ──────────────────────────────────────────
+  socket.on('rooms:list', (cb: Function) => {
+    cb(listRooms());
+  });
 
   // ── 建立房間 ──────────────────────────────────────────────
   socket.on('room:create', (payload: CreateRoomPayload, cb: Function) => {
@@ -112,6 +138,21 @@ io.on('connection', (socket) => {
     handleGuess(io, socket, room, payload.text);
   });
 
+  // ── 私訊 ──────────────────────────────────────────────────
+  socket.on('dm:send', ({ toId, text }: { toId: string; text: string }) => {
+    const senderName = onlineUsers.get(socket.id);
+    if (!senderName || !text.trim()) return;
+    const payload = {
+      fromId: socket.id,
+      fromName: senderName,
+      toId,
+      text: text.trim(),
+      timestamp: Date.now(),
+    };
+    io.to(toId).emit('dm:receive', payload);
+    socket.emit('dm:receive', payload);
+  });
+
   // ── 再玩一局 ──────────────────────────────────────────────
   socket.on('room:playAgain', () => {
     const room = getPlayerRoom(socket.id);
@@ -124,23 +165,35 @@ io.on('connection', (socket) => {
     io.to(room.id).emit('room:backToLobby', { room: sanitizeRoom(room) });
   });
 
+  // ── 主動離開房間 ──────────────────────────────────────────
+  socket.on('room:leave', () => {
+    handleLeave(socket.id);
+    socket.rooms.forEach(r => { if (r !== socket.id) socket.leave(r); });
+  });
+
   // ── 斷線 ──────────────────────────────────────────────────
   socket.on('disconnect', () => {
-    const room = getPlayerRoom(socket.id);
+    onlineUsers.delete(socket.id);
+    broadcastOnline();
+    handleLeave(socket.id);
+  });
+
+  function handleLeave(playerId: string) {
+    const room = getPlayerRoom(playerId);
     if (!room) return;
 
-    const result = removePlayer(room.id, socket.id);
-    if (!result) return; // room deleted
+    const result = removePlayer(room.id, playerId);
+    if (!result) return;
 
     const { room: updatedRoom } = result;
     io.to(updatedRoom.id).emit('room:playerLeave', {
-      playerId: socket.id,
+      playerId,
       players: updatedRoom.players,
       newHostId: updatedRoom.hostId,
     });
 
-    console.log(`[disconnect] ${socket.id} left ${updatedRoom.id}`);
-  });
+    console.log(`[leave] ${playerId} left ${updatedRoom.id}`);
+  }
 });
 
 const PORT = process.env.PORT || 3001;

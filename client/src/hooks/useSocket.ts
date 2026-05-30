@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useGameStore } from '../store/gameStore';
+import { useDmStore } from '../store/dmStore';
 import type { Player, ChatMessage, Stroke, RoomInfo } from '../types';
 
 const SOCKET_URL = import.meta.env.DEV
@@ -53,6 +54,9 @@ export function useSocketEvents(
 
     s.on('connect', () => {
       useGameStore.getState().setMyId(s.id ?? '');
+      // Register name so others can see us in the online list
+      const name = useGameStore.getState().myName;
+      s.emit('users:register', name);
     });
 
     s.on('room:playerJoin', ({ players }: { player: Player; players: Player[] }) => {
@@ -123,12 +127,27 @@ export function useSocketEvents(
       useGameStore.getState().addMessage(msg);
     });
 
-    s.on('game:correctGuess', ({ playerId }: { playerId: string; playerName: string; points: number; scores: unknown[] }) => {
+    s.on('users:online', (users: { id: string; name: string }[]) => {
+      useDmStore.getState().setOnlineUsers(users);
+    });
+
+    s.on('dm:receive', (payload: { fromId: string; fromName: string; toId: string; text: string; timestamp: number }) => {
+      const myId = useGameStore.getState().myId;
+      // Conversation key is always the *other* person's id
+      const peerId = payload.fromId === myId ? payload.toId : payload.fromId;
+      const peerName = payload.fromId === myId
+        ? (useDmStore.getState().names[peerId] ?? peerId)
+        : payload.fromName;
+      useDmStore.getState().addMessage(peerId, peerName, payload);
+    });
+
+    s.on('game:correctGuess', ({ playerId, scores }: { playerId: string; playerName: string; points: number; scores: { id: string; score: number }[] }) => {
       const room = useGameStore.getState().room;
       if (room) {
-        const updated = room.players.map(p =>
-          p.id === playerId ? { ...p, hasGuessed: true } : p
-        );
+        const updated = room.players.map(p => {
+          const s = scores.find(sc => sc.id === p.id);
+          return { ...p, score: s ? s.score : p.score, hasGuessed: p.id === playerId ? true : p.hasGuessed };
+        });
         useGameStore.getState().updatePlayers(updated);
       }
     });
@@ -164,6 +183,8 @@ export function useSocketEvents(
       s.off('draw:stroke');
       s.off('draw:clear');
       s.off('chat:message');
+      s.off('users:online');
+      s.off('dm:receive');
       s.off('game:correctGuess');
       s.off('game:roundEnd');
       s.off('game:end');

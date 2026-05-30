@@ -91,3 +91,15 @@ export function getPlayerRoom(playerId: string): Room | undefined {
   }
   return undefined;
 }
+
+export function listRooms() {
+  return [...rooms.values()]
+    .filter(r => r.state === 'waiting')
+    .map(r => ({
+      id: r.id,
+      playerCount: r.players.length,
+      maxPlayers: 8,
+      settings: r.settings,
+      hostName: r.players.find(p => p.id === r.hostId)?.name ?? '',
+    }));
+}

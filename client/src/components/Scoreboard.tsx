@@ -8,7 +8,7 @@ export default function Scoreboard() {
 
   return (
     <div style={styles.wrapper}>
-      <div style={styles.title}>排行榜</div>
+      <div style={styles.title}>Scoreboard</div>
       {sorted.map((p, i) => (
         <div
           key={p.id}
@@ -33,10 +33,7 @@ export default function Scoreboard() {
 
 const styles: Record<string, React.CSSProperties> = {
   wrapper: {
-    background: '#fff',
-    border: '1px solid #ddd',
-    borderRadius: 8,
-    padding: '0.5rem',
+    padding: '0.6rem 0.5rem',
   },
   title: {
     fontWeight: 700,

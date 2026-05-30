@@ -20,6 +20,7 @@ const COLORS = [
 
 const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ isDrawer }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const isDrawing = useRef(false);
   const currentStroke = useRef<[number, number][]>([]);
   const throttleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -27,6 +28,8 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ isDrawer }, ref) => {
   const [tool, setTool] = useState<'pen' | 'eraser'>('pen');
   const [color, setColor] = useState('#000000');
   const [size, setSize] = useState(4);
+  // cursor circle position in CSS pixels relative to canvas element
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
 
   function getCtx() {
     const c = canvasRef.current;
@@ -68,36 +71,48 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ isDrawer }, ref) => {
     },
   }));
 
-  function getPos(e: React.MouseEvent | React.TouchEvent): [number, number] {
+  // Returns canvas-space coordinates AND updates the CSS-space cursor circle
+  function getPosAndCursor(e: React.MouseEvent | React.TouchEvent): [number, number] {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
+    let clientX: number, clientY: number;
     if ('touches' in e) {
-      const touch = e.touches[0];
-      return [
-        (touch.clientX - rect.left) * scaleX,
-        (touch.clientY - rect.top) * scaleY,
-      ];
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = (e as React.MouseEvent).clientX;
+      clientY = (e as React.MouseEvent).clientY;
     }
+    // CSS-pixel position relative to canvas element (for the visual circle)
+    setCursor({ x: clientX - rect.left, y: clientY - rect.top });
     return [
-      (e.clientX - rect.left) * scaleX,
-      (e.clientY - rect.top) * scaleY,
+      (clientX - rect.left) * scaleX,
+      (clientY - rect.top) * scaleY,
     ];
+  }
+
+  function handleMouseMove(e: React.MouseEvent) {
+    if (!isDrawer) return;
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    setCursor({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    if (isDrawing.current) draw(e);
   }
 
   function startDraw(e: React.MouseEvent | React.TouchEvent) {
     if (!isDrawer) return;
     e.preventDefault();
     isDrawing.current = true;
-    const pos = getPos(e);
+    const pos = getPosAndCursor(e);
     currentStroke.current = [pos];
   }
 
   function draw(e: React.MouseEvent | React.TouchEvent) {
     if (!isDrawer || !isDrawing.current) return;
     e.preventDefault();
-    const pos = getPos(e);
+    const pos = getPosAndCursor(e);
     currentStroke.current.push(pos);
 
     const ctx = getCtx();
@@ -117,11 +132,8 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ isDrawer }, ref) => {
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    // Throttle emit every 30ms
     if (!throttleTimer.current) {
-      throttleTimer.current = setTimeout(() => {
-        throttleTimer.current = null;
-      }, 30);
+      throttleTimer.current = setTimeout(() => { throttleTimer.current = null; }, 30);
       getSocket().emit('draw:stroke', {
         stroke: { tool, color, size, points: [...currentStroke.current] },
       });
@@ -147,35 +159,70 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ isDrawer }, ref) => {
     getSocket().emit('draw:clear');
   }
 
+  // Visual cursor radius in CSS pixels: scale size from canvas-space to CSS-space
+  function cssCursorRadius(): number {
+    const canvas = canvasRef.current;
+    if (!canvas) return size / 2;
+    const rect = canvas.getBoundingClientRect();
+    const scale = rect.width / canvas.width;
+    return (size / 2) * scale;
+  }
+
   return (
-    <div style={styles.wrapper}>
-      <canvas
-        ref={canvasRef}
-        width={700}
-        height={500}
-        style={{
-          ...styles.canvas,
-          cursor: isDrawer ? (tool === 'eraser' ? 'cell' : 'crosshair') : 'default',
-        }}
-        onMouseDown={startDraw}
-        onMouseMove={draw}
-        onMouseUp={endDraw}
-        onMouseLeave={endDraw}
-        onTouchStart={startDraw}
-        onTouchMove={draw}
-        onTouchEnd={endDraw}
-      />
+    <div ref={wrapperRef} style={styles.wrapper}>
+      {/* Canvas + cursor overlay container */}
+      <div style={styles.canvasContainer}>
+        <canvas
+          ref={canvasRef}
+          width={700}
+          height={500}
+          style={{
+            ...styles.canvas,
+            cursor: 'none',
+          }}
+          onMouseDown={startDraw}
+          onMouseMove={handleMouseMove}
+          onMouseUp={endDraw}
+          onMouseLeave={() => { endDraw(); setCursor(null); }}
+          onTouchStart={startDraw}
+          onTouchMove={draw}
+          onTouchEnd={endDraw}
+        />
+
+        {/* Cursor preview circle (drawer only) */}
+        {isDrawer && cursor && (
+          <div
+            style={{
+              position: 'absolute',
+              left: cursor.x,
+              top: cursor.y,
+              width: cssCursorRadius() * 2,
+              height: cssCursorRadius() * 2,
+              borderRadius: '50%',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              border: tool === 'eraser'
+                ? '2px solid rgba(100,100,100,0.7)'
+                : `2px solid ${color === '#ffffff' ? '#999' : color}`,
+              background: tool === 'eraser'
+                ? 'rgba(200,200,200,0.15)'
+                : `${color}33`,
+              boxShadow: '0 0 0 1px rgba(255,255,255,0.6)',
+            }}
+          />
+        )}
+      </div>
 
       {isDrawer && (
         <div style={styles.toolbar}>
           <div style={styles.toolGroup}>
             <button
               style={{ ...styles.toolBtn, ...(tool === 'pen' ? styles.activeTool : {}) }}
-              onClick={() => setTool('pen')} title="畫筆"
+              onClick={() => setTool('pen')} title="Pen"
             >✏️</button>
             <button
               style={{ ...styles.toolBtn, ...(tool === 'eraser' ? styles.activeTool : {}) }}
-              onClick={() => setTool('eraser')} title="橡皮擦"
+              onClick={() => setTool('eraser')} title="Eraser"
             >🧹</button>
           </div>
 
@@ -194,16 +241,25 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ isDrawer }, ref) => {
           </div>
 
           <div style={styles.toolGroup}>
-            <span style={{ fontSize: '0.8rem', color: '#555' }}>粗細</span>
+            <span style={{ fontSize: '0.8rem', color: '#555' }}>Size</span>
             <input
               type="range" min={1} max={30} value={size}
               onChange={e => setSize(Number(e.target.value))}
               style={{ width: 80 }}
             />
-            <span style={{ fontSize: '0.8rem', width: 20 }}>{size}</span>
+            {/* Mini preview circle next to slider */}
+            <div style={{
+              width: Math.max(6, size),
+              height: Math.max(6, size),
+              borderRadius: '50%',
+              background: tool === 'eraser' ? 'transparent' : color,
+              border: tool === 'eraser' ? '1.5px solid #999' : `1.5px solid ${color === '#ffffff' ? '#ccc' : color}`,
+              flexShrink: 0,
+              transition: 'width 0.1s, height 0.1s',
+            }} />
           </div>
 
-          <button style={styles.clearBtn} onClick={handleClear}>清除畫布</button>
+          <button style={styles.clearBtn} onClick={handleClear}>Clear</button>
         </div>
       )}
     </div>
@@ -217,26 +273,35 @@ const styles: Record<string, React.CSSProperties> = {
   wrapper: {
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
     gap: '0.5rem',
+    width: '100%',
+    flex: 1,
+  },
+  canvasContainer: {
+    position: 'relative',
+    width: '100%',
+    flex: 1,
   },
   canvas: {
-    border: '2px solid #ddd',
     borderRadius: 8,
     background: '#fff',
-    maxWidth: '100%',
+    width: '100%',
+    height: '100%',
+    display: 'block',
     touchAction: 'none',
+    boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
   },
   toolbar: {
     display: 'flex',
     alignItems: 'center',
-    gap: '1rem',
-    background: '#fff',
-    padding: '0.5rem 1rem',
+    gap: '0.75rem',
+    background: 'rgba(255,255,255,0.95)',
+    padding: '0.5rem 0.8rem',
     borderRadius: 8,
-    border: '1px solid #ddd',
     flexWrap: 'wrap',
     justifyContent: 'center',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    flexShrink: 0,
   },
   toolGroup: {
     display: 'flex',

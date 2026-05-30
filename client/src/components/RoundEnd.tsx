@@ -10,7 +10,7 @@ export default function RoundEnd({ word, scores, myId }: Props) {
   return (
     <div style={styles.overlay}>
       <div style={styles.card}>
-        <div style={styles.wordReveal}>答案是：<span style={styles.word}>{word}</span></div>
+        <div style={styles.wordReveal}>The word was: <span style={styles.word}>{word}</span></div>
         <div style={styles.list}>
           {sorted.map((p, i) => (
             <div key={p.id} style={{ ...styles.row, ...(p.id === myId ? styles.myRow : {}) }}>
@@ -22,7 +22,7 @@ export default function RoundEnd({ word, scores, myId }: Props) {
             </div>
           ))}
         </div>
-        <p style={styles.next}>5 秒後繼續…</p>
+        <p style={styles.next}>Next round in 5 seconds…</p>
       </div>
     </div>
   );

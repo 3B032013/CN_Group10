@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { Room, ChatMessage } from './types';
 import { getRandomWords } from './wordBank';
-import { calcGuesserScore, calcDrawerBonus } from './ScoreCalculator';
+import { calcGuesserScore, DRAWER_POINTS_PER_GUESS } from './ScoreCalculator';
 import { getRoom, deleteRoom } from './RoomManager';
 import { randomUUID } from 'crypto';
 
@@ -42,6 +42,7 @@ function startChoosingPhase(io: Server, room: Room): void {
   room.state = 'choosing';
   room.strokeHistory = [];
   room.players.forEach(p => { p.hasGuessed = false; });
+  io.to(room.id).emit('draw:clear');
 
   const drawerId = currentDrawerId(room);
   const choices = getRandomWords(3);
@@ -94,7 +95,7 @@ export function chooseWord(io: Server, room: Room, word: string): void {
     }
   });
 
-  const msg = systemMsg(`🎨 ${room.players.find(p => p.id === drawerId)?.name} 開始作畫！`);
+  const msg = systemMsg(`🎨 ${room.players.find(p => p.id === drawerId)?.name} is drawing!`);
   room.messages.push(msg);
   io.to(room.id).emit('chat:message', msg);
 
@@ -134,23 +135,36 @@ export function handleGuess(io: Server, socket: Socket, room: Room, text: string
     player.hasGuessed = true;
     const elapsed = (Date.now() - room.roundStartTime) / 1000;
     const remaining = Math.max(0, room.settings.secondsPerTurn - elapsed);
-    const points = calcGuesserScore(remaining, room.settings.secondsPerTurn);
-    player.score += points;
+    const guesserPoints = calcGuesserScore(remaining, room.settings.secondsPerTurn);
+    player.score += guesserPoints;
 
-    const correctMsg: ChatMessage = {
+    // Drawer gets flat +10 pts per correct guesser (Gartic.io style)
+    const drawer = room.players.find(p => p.id === drawerId);
+    if (drawer) drawer.score += DRAWER_POINTS_PER_GUESS;
+
+    const guessMsg: ChatMessage = {
       id: randomUUID(),
       playerId: 'system',
-      playerName: '系統',
-      text: `🎉 ${player.name} 猜對了！+${points} 分`,
+      playerName: 'System',
+      text: `🎉 ${player.name} guessed it! +${guesserPoints} pts`,
       type: 'correct',
       timestamp: Date.now(),
     };
-    room.messages.push(correctMsg);
-    io.to(room.id).emit('chat:message', correctMsg);
+    const drawerMsg: ChatMessage = {
+      id: randomUUID(),
+      playerId: 'system',
+      playerName: 'System',
+      text: `🎨 ${drawer?.name ?? 'Drawer'} +${DRAWER_POINTS_PER_GUESS} pts`,
+      type: 'correct',
+      timestamp: Date.now() + 1,
+    };
+    room.messages.push(guessMsg, drawerMsg);
+    io.to(room.id).emit('chat:message', guessMsg);
+    io.to(room.id).emit('chat:message', drawerMsg);
     io.to(room.id).emit('game:correctGuess', {
       playerId: player.id,
       playerName: player.name,
-      points,
+      points: guesserPoints,
       scores: getScores(room),
     });
 
@@ -179,13 +193,6 @@ function endRound(io: Server, room: Room): void {
   room.state = 'roundEnd';
 
   const drawerId = currentDrawerId(room);
-  const drawer = room.players.find(p => p.id === drawerId);
-  const correctCount = room.players.filter(p => p.hasGuessed).length;
-
-  if (drawer && correctCount > 0) {
-    drawer.score += calcDrawerBonus(correctCount);
-  }
-
   io.to(room.id).emit('game:roundEnd', {
     word: room.currentWord,
     scores: getScores(room),

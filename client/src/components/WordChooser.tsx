@@ -28,7 +28,7 @@ export default function WordChooser() {
     return (
       <div style={styles.overlay}>
         <div style={styles.card}>
-          <p style={styles.sub}>選一個詞來畫（{countdown}s）</p>
+          <p style={styles.sub}>Choose a word to draw ({countdown}s)</p>
           <div style={styles.choices}>
             {wordChoices.map(w => (
               <button key={w} style={styles.wordBtn} onClick={() => choose(w)}>
@@ -44,7 +44,7 @@ export default function WordChooser() {
   return (
     <div style={styles.overlay}>
       <div style={styles.card}>
-        <p style={styles.waiting}>🎨 {drawerName} 正在選詞…</p>
+        <p style={styles.waiting}>🎨 {drawerName} is choosing a word…</p>
         <div style={styles.spinner} />
       </div>
     </div>

@@ -10,6 +10,8 @@ import Scoreboard from './components/Scoreboard';
 import WordChooser from './components/WordChooser';
 import RoundEnd from './components/RoundEnd';
 import GameEnd from './components/GameEnd';
+import { getSocket } from './hooks/useSocket';
+import DmPanel from './components/DmPanel';
 
 interface RoundEndData {
   word: string;
@@ -18,7 +20,7 @@ interface RoundEndData {
 }
 
 export default function App() {
-  const { room, myId, word, hint, secondsLeft, totalSeconds } = useGameStore();
+  const { room, myId, word, hint, secondsLeft, totalSeconds, reset } = useGameStore();
   const canvasRef = useRef<CanvasHandle>(null);
 
   const [roundEndData, setRoundEndData] = useState<RoundEndData | null>(null);
@@ -43,94 +45,154 @@ export default function App() {
 
   useSocketEvents(onRoundEnd, onGameEnd, onDrawStroke, onClearCanvas);
 
-  // No room yet → lobby
+  function handleLeave() {
+    getSocket().emit('room:leave');
+    reset();
+    setRoundEndData(null);
+    setRankings(null);
+  }
+
   if (!room || room.state === 'waiting') {
-    return <WaitingRoom />;
+    return (
+      <>
+        <WaitingRoom />
+        <DmPanel />
+      </>
+    );
   }
 
-  // Game ended
   if (room.state === 'gameEnd' && rankings) {
-    return <GameEnd rankings={rankings} />;
+    return (
+      <>
+        <GameEnd rankings={rankings} onLeave={handleLeave} />
+        <DmPanel />
+      </>
+    );
   }
 
-  // Game in progress
   const isDrawer = room.currentDrawerId === myId;
   const timerPercent = totalSeconds > 0 ? (secondsLeft / totalSeconds) * 100 : 0;
   const timerColor = timerPercent > 50 ? '#22c55e' : timerPercent > 25 ? '#f97316' : '#ef4444';
 
   return (
-    <div style={styles.container}>
+    <div style={styles.page}>
       {/* Header */}
       <div style={styles.header}>
-        <div style={styles.roundInfo}>
-          第 {room.currentRound} / {room.totalRounds} 回合
-        </div>
-
-        <div style={styles.wordDisplay}>
-          {isDrawer && word ? (
-            <span style={styles.word}>{word}</span>
-          ) : hint ? (
-            <span style={styles.hint}>{hint}</span>
-          ) : null}
-        </div>
-
-        {room.state === 'drawing' && (
-          <div style={styles.timerWrapper}>
-            <div style={styles.timerNum}>{secondsLeft}</div>
-            <div style={styles.timerBar}>
-              <div style={{ ...styles.timerFill, width: `${timerPercent}%`, background: timerColor }} />
-            </div>
+        <div style={styles.headerInner}>
+          <div style={styles.headerLeft}>
+            <button style={styles.leaveBtn} onClick={handleLeave}>← Leave</button>
+            <span style={styles.roundInfo}>Round {room.currentRound} / {room.totalRounds}</span>
           </div>
-        )}
 
-        {room.state === 'choosing' && (
-          <div style={styles.choosingBadge}>選詞中…</div>
-        )}
-      </div>
+          <div style={styles.wordDisplay}>
+            {isDrawer && word
+              ? <span style={styles.word}>{word}</span>
+              : hint
+              ? <span style={styles.hint}>{hint}</span>
+              : null}
+          </div>
 
-      {/* Main area */}
-      <div style={styles.main}>
-        <div style={styles.canvasCol}>
-          <div style={{ position: 'relative' }}>
-            <DrawingCanvas ref={canvasRef} isDrawer={isDrawer} />
-            {room.state === 'choosing' && <WordChooser />}
-            {roundEndData && room.state === 'roundEnd' && (
-              <RoundEnd word={roundEndData.word} scores={roundEndData.scores} myId={myId} />
+          <div style={styles.headerRight}>
+            {room.state === 'drawing' && (
+              <div style={styles.timerWrapper}>
+                <span style={{ ...styles.timerNum, color: timerColor }}>{secondsLeft}</span>
+                <div style={styles.timerBar}>
+                  <div style={{ ...styles.timerFill, width: `${timerPercent}%`, background: timerColor }} />
+                </div>
+              </div>
+            )}
+            {room.state === 'choosing' && (
+              <div style={styles.choosingBadge}>Choosing word…</div>
             )}
           </div>
         </div>
+      </div>
 
-        <div style={styles.sidePanel}>
-          <Scoreboard />
-          <div style={styles.chatWrapper}>
-            <ChatBox />
+      {/* Body: gradient bg + centered content */}
+      <div style={styles.body}>
+        <div style={styles.gameArea}>
+          {/* Canvas column */}
+          <div style={styles.canvasCol}>
+            <div style={styles.canvasCard}>
+              <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <DrawingCanvas ref={canvasRef} isDrawer={isDrawer} />
+                {room.state === 'choosing' && <WordChooser />}
+                {roundEndData && room.state === 'roundEnd' && (
+                  <RoundEnd word={roundEndData.word} scores={roundEndData.scores} myId={myId} />
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Side panel */}
+          <div style={styles.sidePanel}>
+            <div style={styles.scoreCard}>
+              <Scoreboard />
+            </div>
+            <div style={styles.chatCard}>
+              <ChatBox />
+            </div>
           </div>
         </div>
       </div>
+
+      <DmPanel />
     </div>
   );
 }
 
+const HEADER_H = 52;
+
 const styles: Record<string, React.CSSProperties> = {
-  container: {
+  page: {
     minHeight: '100vh',
-    background: '#f0f2f5',
     display: 'flex',
     flexDirection: 'column',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
   },
+
+  // ── Header ──────────────────────────────────────────────
   header: {
-    background: '#fff',
-    borderBottom: '1px solid #ddd',
-    padding: '0.6rem 1rem',
+    height: HEADER_H,
+    background: 'rgba(255,255,255,0.15)',
+    backdropFilter: 'blur(8px)',
+    borderBottom: '1px solid rgba(255,255,255,0.2)',
+    flexShrink: 0,
+  },
+  headerInner: {
+    maxWidth: 1200,
+    margin: '0 auto',
+    height: '100%',
     display: 'flex',
     alignItems: 'center',
     gap: '1rem',
+    padding: '0 1.5rem',
+  },
+  headerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.8rem',
+    flexShrink: 0,
+  },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  leaveBtn: {
+    padding: '0.3rem 0.7rem',
+    background: 'rgba(255,255,255,0.2)',
+    color: '#fff',
+    border: '1px solid rgba(255,255,255,0.4)',
+    borderRadius: 6,
+    cursor: 'pointer',
+    fontSize: '0.8rem',
+    fontWeight: 600,
   },
   roundInfo: {
     fontWeight: 600,
-    color: '#555',
+    color: '#fff',
     fontSize: '0.9rem',
-    flexShrink: 0,
   },
   wordDisplay: {
     flex: 1,
@@ -139,77 +201,111 @@ const styles: Record<string, React.CSSProperties> = {
   word: {
     fontSize: '1.4rem',
     fontWeight: 800,
-    color: '#667eea',
+    color: '#fff',
     letterSpacing: 2,
+    textShadow: '0 1px 4px rgba(0,0,0,0.2)',
   },
   hint: {
     fontSize: '1.4rem',
     fontWeight: 700,
-    letterSpacing: 6,
-    color: '#333',
+    letterSpacing: 8,
+    color: '#fff',
     fontFamily: 'monospace',
+    textShadow: '0 1px 4px rgba(0,0,0,0.2)',
   },
   timerWrapper: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     gap: 2,
-    flexShrink: 0,
   },
   timerNum: {
     fontWeight: 800,
     fontSize: '1.2rem',
-    color: '#333',
-    width: 32,
+    width: 36,
     textAlign: 'center',
+    transition: 'color 0.5s',
   },
   timerBar: {
     width: 80,
-    height: 6,
-    background: '#eee',
+    height: 5,
+    background: 'rgba(255,255,255,0.3)',
     borderRadius: 3,
     overflow: 'hidden',
   },
   timerFill: {
     height: '100%',
     borderRadius: 3,
-    transition: 'width 0.9s linear',
+    transition: 'width 0.9s linear, background 0.5s',
   },
   choosingBadge: {
-    background: '#fef3c7',
-    color: '#92400e',
-    padding: '0.2rem 0.6rem',
+    background: 'rgba(255,255,255,0.25)',
+    color: '#fff',
+    padding: '0.25rem 0.8rem',
     borderRadius: 6,
     fontSize: '0.85rem',
     fontWeight: 600,
-    flexShrink: 0,
   },
-  main: {
+
+  // ── Body ────────────────────────────────────────────────
+  body: {
     flex: 1,
+    display: 'flex',
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    padding: '1rem 1.5rem 1.5rem',
+    minHeight: 0,
+  },
+  gameArea: {
+    width: '100%',
+    maxWidth: 1200,
     display: 'flex',
     gap: '1rem',
-    padding: '1rem',
-    alignItems: 'flex-start',
+    alignItems: 'stretch',
+    height: `calc(100vh - ${HEADER_H}px - 2.5rem)`,
   },
+
+  // ── Canvas column ────────────────────────────────────────
   canvasCol: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  canvasCard: {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
-    gap: '0.5rem',
+    background: 'rgba(255,255,255,0.12)',
+    borderRadius: 14,
+    padding: '0.75rem',
+    backdropFilter: 'blur(4px)',
+    border: '1px solid rgba(255,255,255,0.25)',
+    minHeight: 0,
   },
+
+  // ── Side panel ───────────────────────────────────────────
   sidePanel: {
-    width: 240,
+    width: 300,
+    flexShrink: 0,
     display: 'flex',
     flexDirection: 'column',
-    gap: '0.5rem',
-    height: 'calc(100vh - 80px)',
-    flexShrink: 0,
+    gap: '0.75rem',
   },
-  chatWrapper: {
+  scoreCard: {
+    background: 'rgba(255,255,255,0.95)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+  },
+  chatCard: {
     flex: 1,
     minHeight: 0,
     display: 'flex',
     flexDirection: 'column',
+    background: 'rgba(255,255,255,0.95)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
   },
 };

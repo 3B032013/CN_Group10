@@ -1,7 +1,9 @@
+// Gartic.io-style scoring
+
+// Guesser: proportional to time remaining, minimum 1 pt
 export function calcGuesserScore(remainingSecs: number, totalSecs: number): number {
-  return Math.floor((remainingSecs / totalSecs) * 800) + 200;
+  return Math.max(1, Math.floor((remainingSecs / totalSecs) * 100));
 }
 
-export function calcDrawerBonus(correctGuessers: number): number {
-  return Math.min(correctGuessers * 50, 200);
-}
+// Drawer: flat +10 pts for each person who guesses correctly
+export const DRAWER_POINTS_PER_GUESS = 10;
